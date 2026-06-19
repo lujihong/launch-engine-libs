@@ -102,6 +102,7 @@ case "$(uname -s)" in
                 BUILD_SHARED_LIBS=OFF \
                 onnxruntime_BUILD_UNIT_TESTS=OFF \
                 onnxruntime_BUILD_BENCHMARKS=OFF \
+                CMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 ${CMAKE_EXTRA:+$CMAKE_EXTRA}
         ;;
     *)
@@ -118,6 +119,7 @@ case "$(uname -s)" in
                 BUILD_SHARED_LIBS=OFF \
                 onnxruntime_BUILD_UNIT_TESTS=OFF \
                 onnxruntime_BUILD_BENCHMARKS=OFF \
+                CMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 ${CMAKE_EXTRA:+$CMAKE_EXTRA}
         ;;
 esac
