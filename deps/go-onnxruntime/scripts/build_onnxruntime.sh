@@ -42,7 +42,9 @@ cd "${BUILD_DIR}/onnxruntime"
 
 # 平台特定编译参数（--cmake_extra_defines 接受 KEY=VALUE 格式，不要 -D 前缀）
 # EXTRA_BUILD_FLAGS：build.py 的额外 flags（CoreML / KleidiAI 等），按平台设，默认空。
+# WIN_GENERATOR：Windows 的 cmake 生成器（amd64=Ninja；arm64=VS 生成器，让 MSBuild 正确路由 armasm64 标志）。
 EXTRA_BUILD_FLAGS=""
+WIN_GENERATOR=""
 case "$PLATFORM" in
     darwin-arm64)
         # --use_coreml：开 CoreML 执行后端（Apple 芯片走神经引擎 ANE 加速 ASR/嵌入/视觉）。
@@ -72,16 +74,16 @@ case "$PLATFORM" in
         CMAKE_EXTRA=""
         LIB_NAME="onnxruntime.lib"
         EXTRA_BUILD_FLAGS="--no_kleidiai --no_sve"
+        WIN_GENERATOR="Ninja"
         ;;
     windows-arm64)
-        # arm64 用 clang-cl（clang 的 MSVC 驱动）：能编 KleidiAI/SVE 的 GNU 汇编/intrinsics（MSVC cl.exe 编不了），
-        # 且产 MSVC ABI 库（与后续 clang-MSVC app 链接一致）。KleidiAI/SVE 保留（性能），故不传 --no_kleidiai/--no_sve。
-        # CMAKE_RC_COMPILER=llvm-rc：clang-cl 工具链下编译标志(/bigobj 等)会漏传给 rc.exe(报 RC1106)，
-        # 改用 LLVM 配套的 llvm-rc(对这些标志宽容；VS 的 Llvm/ARM64 自带，与 clang-cl 同目录)。
-        # CMAKE_ASM_MARMASM_COMPILER=clang-cl：KleidiAI 的 .S 是 GNU AArch64 汇编(含 .arch 指令)，
-        # 微软 armasm64 语法不同且不认 /arch→报 A2029；改用 clang-cl 集成汇编器汇编这些 .S。
-        CMAKE_EXTRA="CMAKE_C_COMPILER=clang-cl CMAKE_CXX_COMPILER=clang-cl CMAKE_RC_COMPILER=llvm-rc CMAKE_ASM_MARMASM_COMPILER=clang-cl"
+        # arm64 用 VS 生成器(MSBuild)：KleidiAI 的 .S 是微软 armasm64 语法(ENDP/END/label)，armasm64 才是对的
+        # 汇编器；但 Ninja 那套会把编译器的 /arch 漏传给 armasm64(报 A2029)。VS 生成器/MSBuild 能正确分流
+        # armasm64 的标志，不漏 /arch。--arm64 让 build.py 用 VS 生成器产 ARM64(-A ARM64)。KleidiAI/SVE 保留(性能)。
+        CMAKE_EXTRA=""
         LIB_NAME="onnxruntime.lib"
+        EXTRA_BUILD_FLAGS="--arm64"
+        WIN_GENERATOR="Visual Studio 17 2022"
         ;;
     *)
         echo "不支持的平台: ${PLATFORM}"
@@ -92,16 +94,15 @@ esac
 echo ">>> 编译中..."
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-        # Windows: build.bat。--cmake_generator Ninja：直接用已激活的编译器，不走 "Visual Studio 17 2022"
-        # 生成器（其 vswhere 在已激活 vcvars 环境下会报 could not find VS）。
-        # EXTRA_BUILD_FLAGS（见上 case）：amd64=--no_kleidiai --no_sve（x86 无关）；arm64 空（用 clang-cl 保留 KleidiAI/SVE）。
-        # CMAKE_EXTRA（arm64）= clang-cl 编译器（KleidiAI 的 GNU 汇编 MSVC 编不了，clang 可以）。
+        # Windows: build.bat。生成器按平台（见上 WIN_GENERATOR）：
+        #   amd64=Ninja（msvc-dev-cmd 的 cl.exe；KleidiAI 不参与故关）；
+        #   arm64=VS 生成器（MSBuild 正确路由 armasm64 标志，保留 KleidiAI；EXTRA_BUILD_FLAGS=--arm64 产 ARM64）。
         ./build.bat \
             --config Release \
             --parallel \
             --skip_tests \
             --skip_submodule_sync \
-            --cmake_generator Ninja \
+            --cmake_generator "${WIN_GENERATOR}" \
             --compile_no_warning_as_error \
             ${EXTRA_BUILD_FLAGS} \
             --cmake_extra_defines \
