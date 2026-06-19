@@ -59,11 +59,14 @@ case "$PLATFORM" in
         LIB_NAME="libonnxruntime.a"
         ;;
     windows-amd64)
-        CMAKE_EXTRA="CMAKE_GENERATOR_PLATFORM=x64"
+        # 用 Ninja 生成器 + msvc-dev-cmd 已激活的 cl.exe(x64)，不传 CMAKE_GENERATOR_PLATFORM
+        # （那是 VS 生成器概念）。架构由 vcvars 环境决定。
+        CMAKE_EXTRA=""
         LIB_NAME="onnxruntime.lib"
         ;;
     windows-arm64)
-        CMAKE_EXTRA="CMAKE_GENERATOR_PLATFORM=ARM64"
+        # 同上；arm64 由 msvc-dev-cmd arch=amd64_arm64 的交叉 cl.exe 提供。
+        CMAKE_EXTRA=""
         LIB_NAME="onnxruntime.lib"
         ;;
     *)
@@ -75,12 +78,14 @@ esac
 echo ">>> 编译中..."
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-        # Windows: 使用 build.bat
+        # Windows: build.bat。--cmake_generator Ninja：直接用 msvc-dev-cmd 已激活的 cl.exe 编译，
+        # 不走 "Visual Studio 17 2022" 生成器——其 vswhere 在已激活 vcvars 环境下会报 could not find VS。
         ./build.bat \
             --config Release \
             --parallel \
             --skip_tests \
             --skip_submodule_sync \
+            --cmake_generator Ninja \
             --cmake_extra_defines \
                 CMAKE_POSITION_INDEPENDENT_CODE=ON \
                 BUILD_SHARED_LIBS=OFF \

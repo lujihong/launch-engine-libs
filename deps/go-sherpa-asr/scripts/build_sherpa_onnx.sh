@@ -63,8 +63,8 @@ case "$PLATFORM" in
     darwin-amd64)  CMAKE_EXTRA="-DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15" ;;
     linux-arm64)   CMAKE_EXTRA="-DCMAKE_SYSTEM_PROCESSOR=aarch64" ;;
     linux-amd64)   CMAKE_EXTRA="" ;;
-    windows-amd64) CMAKE_EXTRA="-DCMAKE_GENERATOR_PLATFORM=x64" ;;
-    windows-arm64) CMAKE_EXTRA="-DCMAKE_GENERATOR_PLATFORM=ARM64" ;;
+    windows-amd64) CMAKE_EXTRA="-G Ninja" ;; # Ninja + msvc-dev-cmd 的 cl.exe(x64)，避开 VS 生成器找不到 VS
+    windows-arm64) CMAKE_EXTRA="-G Ninja" ;; # arm64 由 amd64_arm64 交叉 cl.exe 提供
     *) CMAKE_EXTRA="" ;;
 esac
 

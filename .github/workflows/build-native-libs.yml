@@ -41,12 +41,22 @@ jobs:
           git --version
 
       # Windows：MSVC 开发环境（build.bat / lib.exe / cl.exe 需 vcvars）。
-      # windows-arm64 用 x64 host 交叉编译（CMAKE_GENERATOR_PLATFORM=ARM64）。
+      # windows-arm64 用 x64 host 交叉编译（cl.exe 经 arch=amd64_arm64 交叉到 arm64）。
       - name: Setup MSVC（仅 Windows）
         if: startsWith(inputs.platform, 'windows')
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ inputs.platform == 'windows-arm64' && 'amd64_arm64' || 'amd64' }}
+
+      # Ninja：脚本用 -G Ninja 直接调已激活的 cl.exe，绕开 "Visual Studio" 生成器在已激活 vcvars
+      # 环境下报 "could not find any instance of Visual Studio" 的坑。pip 装的 ninja 在 Python Scripts
+      # 目录（setup-python 已加进 PATH），cmake 可发现。
+      - name: Install Ninja（仅 Windows）
+        if: startsWith(inputs.platform, 'windows')
+        shell: bash
+        run: |
+          pip install ninja
+          ninja --version
 
       - name: 编译 onnxruntime 静态库
         shell: bash
