@@ -122,6 +122,7 @@ mkdir -p "${TARGET_DIR}"
 
 echo ">>> 拷贝静态库（排除 libonnxruntime.a）..."
 for lib in install/lib/*.a; do
+    [ -f "$lib" ] || continue  # Windows 无 .a(产 .lib)；glob 未匹配会保留字面量,跳过避免 cp 报错+set -e 退出
     libname="$(command basename "$lib")"
     if [ "$libname" = "libonnxruntime.a" ]; then
         echo "    跳过: $libname（由 go-onnxruntime 提供）"
