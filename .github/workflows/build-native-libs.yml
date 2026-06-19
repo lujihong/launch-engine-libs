@@ -1,0 +1,80 @@
+# 产出各平台原生静态库（onnxruntime + sherpa-onnx）—— 供 launch-master「四架构全功能」。
+# 本仓 public → Actions 全免费（含 macOS / windows-arm）。脚本从上游 clone onnx/sherpa 源码编译，
+# 不含任何专有/版权内容。产物为 artifact，下载后提交进私有源码仓 launch-master 的 deps/。
+#
+# 用法：Actions → Build Native Libs → Run workflow → 选 platform（默认 darwin-arm64，先验证整链路）。
+#   onnxruntime 源码编译每平台 1-3 小时；public 仓免费但有挂钟，先单平台验证再扩 Windows。
+name: Build Native Libs
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "目标平台（先 darwin-arm64 验证，成功再 windows-*）"
+        required: true
+        type: choice
+        default: darwin-arm64
+        options:
+          - darwin-arm64
+          - darwin-amd64
+          - windows-amd64
+          - windows-arm64
+
+jobs:
+  build:
+    name: libs ${{ inputs.platform }}
+    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-14","darwin-amd64":"macos-13","windows-amd64":"windows-latest","windows-arm64":"windows-latest"}')[inputs.platform] }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python（onnxruntime build.py 需要）
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 确认工具链
+        shell: bash
+        run: |
+          cmake --version
+          python --version
+          git --version
+
+      # Windows：MSVC 开发环境（build.bat / lib.exe / cl.exe 需 vcvars）。
+      # windows-arm64 用 x64 host 交叉编译（CMAKE_GENERATOR_PLATFORM=ARM64）。
+      - name: Setup MSVC（仅 Windows）
+        if: startsWith(inputs.platform, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ inputs.platform == 'windows-arm64' && 'amd64_arm64' || 'amd64' }}
+
+      - name: 编译 onnxruntime 静态库
+        shell: bash
+        run: |
+          chmod +x deps/go-onnxruntime/scripts/build_onnxruntime.sh
+          deps/go-onnxruntime/scripts/build_onnxruntime.sh ${{ inputs.platform }}
+
+      - name: 编译 sherpa-onnx 静态库
+        shell: bash
+        run: |
+          chmod +x deps/go-sherpa-asr/scripts/build_sherpa_onnx.sh
+          deps/go-sherpa-asr/scripts/build_sherpa_onnx.sh ${{ inputs.platform }}
+
+      - name: 列出产物
+        shell: bash
+        run: |
+          echo "=== onnxruntime libs ==="; ls -lh deps/go-onnxruntime/lib/${{ inputs.platform }}/ || true
+          echo "=== sherpa libs ===";      ls -lh deps/go-sherpa-asr/lib/${{ inputs.platform }}/ || true
+
+      # 产物：库 + 脚本更新的共享头文件。下载后解压到私有仓 launch-master/ 根覆盖即可，再提交。
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-${{ inputs.platform }}
+          retention-days: 30
+          path: |
+            deps/go-onnxruntime/lib/${{ inputs.platform }}/
+            deps/go-sherpa-asr/lib/${{ inputs.platform }}/
+            deps/go-onnxruntime/include/
+            deps/go-onnxruntime/onnxruntime_c_api.h
+            deps/go-onnxruntime/onnxruntime_ep_c_api.h
+            deps/go-sherpa-asr/c-api.h
