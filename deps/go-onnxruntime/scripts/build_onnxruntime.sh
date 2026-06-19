@@ -80,6 +80,8 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
         # Windows: build.bat。--cmake_generator Ninja：直接用 msvc-dev-cmd 已激活的 cl.exe 编译，
         # 不走 "Visual Studio 17 2022" 生成器——其 vswhere 在已激活 vcvars 环境下会报 could not find VS。
+        # --no_kleidiai --no_sve：KleidiAI/SVE 是 Arm 专有(KleidiAI 含 GCC/clang 手写汇编),MSVC 的 arm64
+        # 编译器编不了→在 windows-arm64 会编译失败;关掉(纯性能优化,不影响功能,arm64 退 NEON)。x86 上本就空操作。
         ./build.bat \
             --config Release \
             --parallel \
@@ -87,6 +89,8 @@ case "$(uname -s)" in
             --skip_submodule_sync \
             --cmake_generator Ninja \
             --compile_no_warning_as_error \
+            --no_kleidiai \
+            --no_sve \
             --cmake_extra_defines \
                 CMAKE_POSITION_INDEPENDENT_CODE=ON \
                 BUILD_SHARED_LIBS=OFF \
