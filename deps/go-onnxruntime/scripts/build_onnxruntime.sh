@@ -78,7 +78,9 @@ case "$PLATFORM" in
         # 且产 MSVC ABI 库（与后续 clang-MSVC app 链接一致）。KleidiAI/SVE 保留（性能），故不传 --no_kleidiai/--no_sve。
         # CMAKE_RC_COMPILER=llvm-rc：clang-cl 工具链下编译标志(/bigobj 等)会漏传给 rc.exe(报 RC1106)，
         # 改用 LLVM 配套的 llvm-rc(对这些标志宽容；VS 的 Llvm/ARM64 自带，与 clang-cl 同目录)。
-        CMAKE_EXTRA="CMAKE_C_COMPILER=clang-cl CMAKE_CXX_COMPILER=clang-cl CMAKE_RC_COMPILER=llvm-rc"
+        # CMAKE_ASM_MARMASM_COMPILER=clang-cl：KleidiAI 的 .S 是 GNU AArch64 汇编(含 .arch 指令)，
+        # 微软 armasm64 语法不同且不认 /arch→报 A2029；改用 clang-cl 集成汇编器汇编这些 .S。
+        CMAKE_EXTRA="CMAKE_C_COMPILER=clang-cl CMAKE_CXX_COMPILER=clang-cl CMAKE_RC_COMPILER=llvm-rc CMAKE_ASM_MARMASM_COMPILER=clang-cl"
         LIB_NAME="onnxruntime.lib"
         ;;
     *)
