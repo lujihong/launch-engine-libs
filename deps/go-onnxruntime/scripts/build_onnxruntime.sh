@@ -86,6 +86,7 @@ case "$(uname -s)" in
             --skip_tests \
             --skip_submodule_sync \
             --cmake_generator Ninja \
+            --compile_no_warning_as_error \
             --cmake_extra_defines \
                 CMAKE_POSITION_INDEPENDENT_CODE=ON \
                 BUILD_SHARED_LIBS=OFF \
@@ -100,6 +101,7 @@ case "$(uname -s)" in
             --parallel \
             --skip_tests \
             --skip_submodule_sync \
+            --compile_no_warning_as_error \
             --cmake_extra_defines \
                 CMAKE_POSITION_INDEPENDENT_CODE=ON \
                 BUILD_SHARED_LIBS=OFF \
