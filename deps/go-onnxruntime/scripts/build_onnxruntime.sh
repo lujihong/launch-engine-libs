@@ -46,13 +46,16 @@ EXTRA_BUILD_FLAGS=""
 case "$PLATFORM" in
     darwin-arm64)
         # --use_coreml：开 CoreML 执行后端（Apple 芯片走神经引擎 ANE 加速 ASR/嵌入/视觉）。
-        CMAKE_EXTRA="CMAKE_OSX_ARCHITECTURES=arm64 CMAKE_OSX_DEPLOYMENT_TARGET=11.0"
+        # CMAKE_SKIP_INSTALL_RULES=ON：CoreML+静态下 onnxruntime 的 install(EXPORT) 引用了未导出的
+        # coreml_proto 会在 generate 报错；我们不用它的 install(自己从 build/ 捞 .a 合并)，跳过即绕开。
+        CMAKE_EXTRA="CMAKE_OSX_ARCHITECTURES=arm64 CMAKE_OSX_DEPLOYMENT_TARGET=11.0 CMAKE_SKIP_INSTALL_RULES=ON"
         LIB_NAME="libonnxruntime.a"
         EXTRA_BUILD_FLAGS="--use_coreml"
         ;;
     darwin-amd64)
         # --use_coreml：CoreML 后端（Intel Mac 走 CPU/GPU，Apple 芯片经 Rosetta 跑时仍可用）。
-        CMAKE_EXTRA="CMAKE_OSX_ARCHITECTURES=x86_64 CMAKE_OSX_DEPLOYMENT_TARGET=10.15"
+        # CMAKE_SKIP_INSTALL_RULES=ON：同 arm64，绕开 CoreML install(EXPORT) coreml_proto 报错。
+        CMAKE_EXTRA="CMAKE_OSX_ARCHITECTURES=x86_64 CMAKE_OSX_DEPLOYMENT_TARGET=10.15 CMAKE_SKIP_INSTALL_RULES=ON"
         LIB_NAME="libonnxruntime.a"
         EXTRA_BUILD_FLAGS="--use_coreml"
         ;;
