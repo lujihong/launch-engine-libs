@@ -78,6 +78,25 @@ echo ">>> 使用外部 onnxruntime:"
 echo "    头文件: ${SHERPA_ONNXRUNTIME_INCLUDE_DIR}"
 echo "    静态库: ${SHERPA_ONNXRUNTIME_LIB_DIR}"
 
+# Windows 纯静态：sherpa 上游 cmake/onnxruntime.cmake 在 Win 写死假设 onnxruntime 是 DLL
+# （add_library SHARED IMPORTED + 非 GPU 分支 IMPORTED_IMPLIB 为空 → 报参数不全）。
+# 喂我们预编译的静态 onnxruntime.lib 会崩。patch 成 STATIC IMPORTED + 去掉空 IMPLIB：
+# sherpa 只需 onnxruntime 头文件来编译自身静态库；onnxruntime 符号在最终 Go app 链接时解析。
+if [ "$PLATFORM" = "windows-amd64" ] || [ "$PLATFORM" = "windows-arm64" ]; then
+    echo ">>> patch cmake/onnxruntime.cmake 接受静态 onnxruntime（Windows 纯静态）"
+    python - <<'PYEOF'
+import re
+p = "cmake/onnxruntime.cmake"
+s = open(p, encoding="utf-8").read()
+assert "add_library(onnxruntime SHARED IMPORTED)" in s, "上游结构变了，需重核 patch"
+s = s.replace("add_library(onnxruntime SHARED IMPORTED)",
+              "add_library(onnxruntime STATIC IMPORTED)")
+s = re.sub(r'\n[ \t]*IMPORTED_IMPLIB \$\{location_onnxruntime_lib2\}', '', s)
+open(p, "w", encoding="utf-8").write(s)
+print("    patched: SHARED->STATIC, removed empty IMPORTED_IMPLIB")
+PYEOF
+fi
+
 echo ">>> 编译中（含 TTS 支持）..."
 cmake -S . -B build \
     -DBUILD_SHARED_LIBS=OFF \
