@@ -97,12 +97,20 @@ print("    patched: SHARED->STATIC, removed empty IMPORTED_IMPLIB")
 PYEOF
 fi
 
+# CoreML：darwin 开启（不传 DISABLE_COREML，用 onnxruntime 的 CoreML 后端，需 onnx 也 --use_coreml 编）；
+# windows/linux CoreML 不可用，传 DISABLE 避免编无关代码。
+if [[ "$PLATFORM" == darwin-* ]]; then
+    COREML_CXX_FLAGS=""
+else
+    COREML_CXX_FLAGS="-DSHERPA_ONNX_DISABLE_COREML"
+fi
+
 echo ">>> 编译中（含 TTS 支持）..."
 cmake -S . -B build \
     -DBUILD_SHARED_LIBS=OFF \
     -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON \
-    -DCMAKE_CXX_FLAGS="-DSHERPA_ONNX_DISABLE_COREML" \
-    -DCMAKE_C_FLAGS="-DSHERPA_ONNX_DISABLE_COREML" \
+    -DCMAKE_CXX_FLAGS="${COREML_CXX_FLAGS}" \
+    -DCMAKE_C_FLAGS="${COREML_CXX_FLAGS}" \
     -DSHERPA_ONNX_ENABLE_C_API=ON \
     -DSHERPA_ONNX_ENABLE_TTS=ON \
     -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF \

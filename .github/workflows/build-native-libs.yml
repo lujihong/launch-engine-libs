@@ -59,6 +59,19 @@ jobs:
           pip install ninja
           ninja --version
 
+      # windows-arm64 用 clang-cl 编 KleidiAI/SVE（MSVC cl.exe 编不了其 GNU 汇编/intrinsics）。
+      # 确保 clang-cl 可用：已装则用，缺则装 LLVM 并加进 PATH（供后续 cmake 发现）。
+      - name: Install LLVM/clang-cl（windows-arm64）
+        if: inputs.platform == 'windows-arm64'
+        shell: bash
+        run: |
+          if command -v clang-cl >/dev/null 2>&1; then
+            echo "clang-cl 已存在"; clang-cl --version
+          else
+            echo "安装 LLVM..."; choco install llvm -y
+            echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
+          fi
+
       - name: 编译 onnxruntime 静态库
         shell: bash
         run: |

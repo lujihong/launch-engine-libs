@@ -41,14 +41,20 @@ fi
 cd "${BUILD_DIR}/onnxruntime"
 
 # 平台特定编译参数（--cmake_extra_defines 接受 KEY=VALUE 格式，不要 -D 前缀）
+# EXTRA_BUILD_FLAGS：build.py 的额外 flags（CoreML / KleidiAI 等），按平台设，默认空。
+EXTRA_BUILD_FLAGS=""
 case "$PLATFORM" in
     darwin-arm64)
+        # --use_coreml：开 CoreML 执行后端（Apple 芯片走神经引擎 ANE 加速 ASR/嵌入/视觉）。
         CMAKE_EXTRA="CMAKE_OSX_ARCHITECTURES=arm64 CMAKE_OSX_DEPLOYMENT_TARGET=11.0"
         LIB_NAME="libonnxruntime.a"
+        EXTRA_BUILD_FLAGS="--use_coreml"
         ;;
     darwin-amd64)
+        # --use_coreml：CoreML 后端（Intel Mac 走 CPU/GPU，Apple 芯片经 Rosetta 跑时仍可用）。
         CMAKE_EXTRA="CMAKE_OSX_ARCHITECTURES=x86_64 CMAKE_OSX_DEPLOYMENT_TARGET=10.15"
         LIB_NAME="libonnxruntime.a"
+        EXTRA_BUILD_FLAGS="--use_coreml"
         ;;
     linux-amd64)
         CMAKE_EXTRA=""
@@ -59,14 +65,15 @@ case "$PLATFORM" in
         LIB_NAME="libonnxruntime.a"
         ;;
     windows-amd64)
-        # 用 Ninja 生成器 + msvc-dev-cmd 已激活的 cl.exe(x64)，不传 CMAKE_GENERATOR_PLATFORM
-        # （那是 VS 生成器概念）。架构由 vcvars 环境决定。
+        # Ninja + msvc-dev-cmd 的 cl.exe(x64)。x86 上 KleidiAI/SVE 不参与，关闭（与已验证配置一致）。
         CMAKE_EXTRA=""
         LIB_NAME="onnxruntime.lib"
+        EXTRA_BUILD_FLAGS="--no_kleidiai --no_sve"
         ;;
     windows-arm64)
-        # 同上；arm64 由 msvc-dev-cmd arch=amd64_arm64 的交叉 cl.exe 提供。
-        CMAKE_EXTRA=""
+        # arm64 用 clang-cl（clang 的 MSVC 驱动）：能编 KleidiAI/SVE 的 GNU 汇编/intrinsics（MSVC cl.exe 编不了），
+        # 且产 MSVC ABI 库（与后续 clang-MSVC app 链接一致）。KleidiAI/SVE 保留（性能），故不传 --no_kleidiai/--no_sve。
+        CMAKE_EXTRA="CMAKE_C_COMPILER=clang-cl CMAKE_CXX_COMPILER=clang-cl"
         LIB_NAME="onnxruntime.lib"
         ;;
     *)
@@ -78,10 +85,10 @@ esac
 echo ">>> 编译中..."
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-        # Windows: build.bat。--cmake_generator Ninja：直接用 msvc-dev-cmd 已激活的 cl.exe 编译，
-        # 不走 "Visual Studio 17 2022" 生成器——其 vswhere 在已激活 vcvars 环境下会报 could not find VS。
-        # --no_kleidiai --no_sve：KleidiAI/SVE 是 Arm 专有(KleidiAI 含 GCC/clang 手写汇编),MSVC 的 arm64
-        # 编译器编不了→在 windows-arm64 会编译失败;关掉(纯性能优化,不影响功能,arm64 退 NEON)。x86 上本就空操作。
+        # Windows: build.bat。--cmake_generator Ninja：直接用已激活的编译器，不走 "Visual Studio 17 2022"
+        # 生成器（其 vswhere 在已激活 vcvars 环境下会报 could not find VS）。
+        # EXTRA_BUILD_FLAGS（见上 case）：amd64=--no_kleidiai --no_sve（x86 无关）；arm64 空（用 clang-cl 保留 KleidiAI/SVE）。
+        # CMAKE_EXTRA（arm64）= clang-cl 编译器（KleidiAI 的 GNU 汇编 MSVC 编不了，clang 可以）。
         ./build.bat \
             --config Release \
             --parallel \
@@ -89,8 +96,7 @@ case "$(uname -s)" in
             --skip_submodule_sync \
             --cmake_generator Ninja \
             --compile_no_warning_as_error \
-            --no_kleidiai \
-            --no_sve \
+            ${EXTRA_BUILD_FLAGS} \
             --cmake_extra_defines \
                 CMAKE_POSITION_INDEPENDENT_CODE=ON \
                 BUILD_SHARED_LIBS=OFF \
@@ -99,13 +105,14 @@ case "$(uname -s)" in
                 ${CMAKE_EXTRA:+$CMAKE_EXTRA}
         ;;
     *)
-        # macOS / Linux: 使用 build.sh
+        # macOS / Linux: 使用 build.sh。EXTRA_BUILD_FLAGS（见上 case）：darwin=--use_coreml（CoreML 后端）。
         ./build.sh \
             --config Release \
             --parallel \
             --skip_tests \
             --skip_submodule_sync \
             --compile_no_warning_as_error \
+            ${EXTRA_BUILD_FLAGS} \
             --cmake_extra_defines \
                 CMAKE_POSITION_INDEPENDENT_CODE=ON \
                 BUILD_SHARED_LIBS=OFF \
