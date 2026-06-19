@@ -23,7 +23,7 @@ on:
 jobs:
   build:
     name: libs ${{ inputs.platform }}
-    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-14","darwin-amd64":"macos-13","windows-amd64":"windows-latest","windows-arm64":"windows-latest"}')[inputs.platform] }}
+    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-14","darwin-amd64":"macos-13","windows-amd64":"windows-latest","windows-arm64":"windows-11-arm"}')[inputs.platform] }}
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
@@ -41,12 +41,13 @@ jobs:
           git --version
 
       # Windows：MSVC 开发环境（build.bat / lib.exe / cl.exe 需 vcvars）。
-      # windows-arm64 用 x64 host 交叉编译（cl.exe 经 arch=amd64_arm64 交叉到 arm64）。
+      # windows-arm64 用原生 windows-11-arm runner（arch=arm64），避免交叉编译时 host 工具(protoc 等)
+      # 被编成 arm64 无法在 x64 主机运行的问题。windows-amd64 仍用 windows-latest（arch=amd64）。
       - name: Setup MSVC（仅 Windows）
         if: startsWith(inputs.platform, 'windows')
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: ${{ inputs.platform == 'windows-arm64' && 'amd64_arm64' || 'amd64' }}
+          arch: ${{ inputs.platform == 'windows-arm64' && 'arm64' || 'amd64' }}
 
       # Ninja：脚本用 -G Ninja 直接调已激活的 cl.exe，绕开 "Visual Studio" 生成器在已激活 vcvars
       # 环境下报 "could not find any instance of Visual Studio" 的坑。pip 装的 ninja 在 Python Scripts
