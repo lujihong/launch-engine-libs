@@ -73,7 +73,9 @@ case "$PLATFORM" in
     windows-arm64)
         # arm64 用 clang-cl（clang 的 MSVC 驱动）：能编 KleidiAI/SVE 的 GNU 汇编/intrinsics（MSVC cl.exe 编不了），
         # 且产 MSVC ABI 库（与后续 clang-MSVC app 链接一致）。KleidiAI/SVE 保留（性能），故不传 --no_kleidiai/--no_sve。
-        CMAKE_EXTRA="CMAKE_C_COMPILER=clang-cl CMAKE_CXX_COMPILER=clang-cl"
+        # CMAKE_RC_COMPILER=llvm-rc：clang-cl 工具链下编译标志(/bigobj 等)会漏传给 rc.exe(报 RC1106)，
+        # 改用 LLVM 配套的 llvm-rc(对这些标志宽容；VS 的 Llvm/ARM64 自带，与 clang-cl 同目录)。
+        CMAKE_EXTRA="CMAKE_C_COMPILER=clang-cl CMAKE_CXX_COMPILER=clang-cl CMAKE_RC_COMPILER=llvm-rc"
         LIB_NAME="onnxruntime.lib"
         ;;
     *)
