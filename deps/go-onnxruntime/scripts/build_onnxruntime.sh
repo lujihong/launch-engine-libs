@@ -165,8 +165,12 @@ case "$(uname -s)" in
         ranlib "${TARGET_DIR}/${LIB_NAME}"
         ;;
     MINGW*|MSYS*|CYGWIN*)
-        # Windows: 使用 lib.exe 合并所有 .lib
-        lib.exe /OUT:"${TARGET_DIR}/${LIB_NAME}" ${ALL_LIBS}
+        # Windows: lib.exe 合并所有 .lib。Git Bash 会把 "/OUT:" 误当 POSIX 路径转换
+        # （→ C:\Program Files\Git\OUT;… 触发 LNK1104）。用 "-OUT:"（短横不触发转换）
+        # + cygpath -w 输出绝对 Windows 路径；MSYS_NO_PATHCONV=1 关参数路径转换，输入 .lib
+        # 用相对正斜杠路径（lib.exe 接受，cwd=onnxruntime 仓根）。
+        OUT_WIN=$(cygpath -w "${TARGET_DIR}/${LIB_NAME}")
+        MSYS_NO_PATHCONV=1 lib.exe "-OUT:${OUT_WIN}" ${ALL_LIBS}
         ;;
 esac
 
