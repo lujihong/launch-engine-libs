@@ -1,0 +1,67 @@
+# 把 Build Native Libs 产出的 artifact 在 GitHub 服务端转存进 `native-libs` Release——
+# 零本地带宽(不用手动下载再上传)。供 launch-master 的 deps/fetch-native-libs.sh token-less 拉取。
+#
+# 用法：Actions → Publish Native Libs to Release → Run workflow（platforms 默认 windows 两个）。
+#   它自动找每个平台最新一个未过期 artifact,打包成 native-libs-<platform>.tar.gz 上传到 native-libs release。
+#   Windows 的 onnxruntime.lib 太大(~2GB,/MT 静态)不进 git,故走 release 制品这条路。
+name: Publish Native Libs to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "要发布的平台(空格分隔)"
+        required: false
+        default: "windows-amd64 windows-arm64"
+
+permissions:
+  contents: write # 发 Release
+  actions: read # 列/下载 artifact
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 转存最新 artifact 到 native-libs release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PLATFORMS: ${{ github.event.inputs.platforms }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 确保 release 存在(首次自动建)
+          gh release view native-libs --repo "$REPO" >/dev/null 2>&1 || \
+            gh release create native-libs --repo "$REPO" --title "native-libs" \
+              --notes "预编译原生静态库(onnxruntime + sherpa-onnx)。供 launch-master deps/fetch-native-libs.sh token-less 拉取。"
+
+          mkdir -p out
+          for plat in $PLATFORMS; do
+            name="native-libs-${plat}"
+            echo "::group::${plat}"
+            # 找该 artifact 最新一个未过期的 id(按 created_at 排序取最后一个)
+            id=$(gh api --paginate "repos/${REPO}/actions/artifacts?per_page=100" \
+                  --jq ".artifacts[] | select(.name==\"${name}\" and .expired==false) | \"\(.created_at) \(.id)\"" \
+                  | sort | tail -1 | awk '{print $2}')
+            if [ -z "${id}" ]; then
+              echo "::warning::未找到未过期 artifact ${name}(可能已过期或未构建),跳过"
+              echo "::endgroup::"; continue
+            fi
+            echo "找到 ${name} 最新 artifact id=${id}"
+            gh api "repos/${REPO}/actions/artifacts/${id}/zip" > "art-${plat}.zip"
+            rm -rf "x-${plat}"; mkdir -p "x-${plat}"
+            unzip -q "art-${plat}.zip" -d "x-${plat}"
+            # 打包成 fetch 期望的结构(仅 lib 目录;头文件已随 launch-master 提交,平台无关)
+            if [ ! -d "x-${plat}/go-onnxruntime/lib/${plat}" ] || [ ! -d "x-${plat}/go-sherpa-asr/lib/${plat}" ]; then
+              echo "::error::artifact 结构异常,缺 go-onnxruntime/lib/${plat} 或 go-sherpa-asr/lib/${plat}"
+              ls -R "x-${plat}" | head -40; exit 1
+            fi
+            tar -czf "out/${name}.tar.gz" -C "x-${plat}" \
+              "go-onnxruntime/lib/${plat}" "go-sherpa-asr/lib/${plat}"
+            ls -lh "out/${name}.tar.gz"
+            gh release upload native-libs --repo "$REPO" "out/${name}.tar.gz" --clobber
+            echo "✓ 已发布 ${name}.tar.gz 到 native-libs release"
+            echo "::endgroup::"
+          done
+          echo "=== native-libs release 当前资产 ==="
+          gh release view native-libs --repo "$REPO" --json assets --jq '.assets[].name'
