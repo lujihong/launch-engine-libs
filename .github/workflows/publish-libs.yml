@@ -63,5 +63,30 @@ jobs:
             echo "✓ 已发布 ${name}.tar.gz 到 native-libs release"
             echo "::endgroup::"
           done
+          # ---- MuPDF 库(独立 artifact native-mupdf-<plat>,给 go-fitz 用;arm64 未建则跳过)----
+          for plat in $PLATFORMS; do
+            mname="native-mupdf-${plat}"
+            echo "::group::mupdf ${plat}"
+            mid=$(gh api --paginate "repos/${REPO}/actions/artifacts?per_page=100" \
+                  --jq ".artifacts[] | select(.name==\"${mname}\" and .expired==false) | \"\(.created_at) \(.id)\"" \
+                  | sort | tail -1 | awk '{print $2}')
+            if [ -z "${mid}" ]; then echo "::warning::无 ${mname} artifact(未构建/已过期),跳过"; echo "::endgroup::"; continue; fi
+            echo "找到 ${mname} 最新 artifact id=${mid}"
+            gh api "repos/${REPO}/actions/artifacts/${mid}/zip" > "artm-${plat}.zip"
+            rm -rf "xm-${plat}"; mkdir -p "xm-${plat}"
+            unzip -q "artm-${plat}.zip" -d "xm-${plat}"
+            # 组织成 go-fitz/lib/<plat>/ 结构(fetch 解到 deps/ 即得 deps/go-fitz/lib/<plat>/,与 onnx/sherpa 同源)
+            rm -rf "pkgm-${plat}"; mkdir -p "pkgm-${plat}/go-fitz/lib/${plat}"
+            find "xm-${plat}" -name "*.lib" -exec cp {} "pkgm-${plat}/go-fitz/lib/${plat}/" \;
+            if [ -z "$(ls -A "pkgm-${plat}/go-fitz/lib/${plat}/")" ]; then
+              echo "::error::${mname} 解出后无 .lib"; ls -R "xm-${plat}" | head -20; exit 1
+            fi
+            tar -czf "out/${mname}.tar.gz" -C "pkgm-${plat}" "go-fitz/lib/${plat}"
+            ls -lh "out/${mname}.tar.gz"
+            gh release upload native-libs --repo "$REPO" "out/${mname}.tar.gz" --clobber
+            echo "✓ 已发布 ${mname}.tar.gz 到 native-libs release"
+            echo "::endgroup::"
+          done
+
           echo "=== native-libs release 当前资产 ==="
           gh release view native-libs --repo "$REPO" --json assets --jq '.assets[].name'
