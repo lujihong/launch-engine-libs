@@ -101,10 +101,18 @@ fi
 # 「方案 Release|x64」正确映射成它自己的 Release|Win32(bin2coff 只有 Win32 配置,是 x86 宿主小工具)。
 # 直接 msbuild libmupdf.vcxproj 会把 x64 强加给被引用的 bin2coff → MSB8013 "doesn't contain Release|x64"。
 # 不强制 PlatformToolset(用 runner 的 VS 默认;之前各工程已能编,说明默认 toolset 可用)。
-echo ">>> MSBuild mupdf.sln -t:libmupdf(Release|${MSB_PLAT})..."
-MSBuild.exe "${WIN32}/mupdf.sln" -t:libmupdf \
-    -p:Configuration=Release -p:Platform="${MSB_PLAT}" \
-    -m -v:minimal -nologo
+if [ "$MSB_PLAT" = "ARM64" ]; then
+    # arm64:**直接编 libmupdf.vcxproj**(不走 .sln)。bin2coff 已由 patch 补了 ARM64 配置,故级联编它不再
+    # MSB8013;且直编无 .sln 上下文 → 不触发 AssignProjectConfiguration 的 MSB3107(那是 .sln -t: 模式对
+    # 新增 ARM64 方案配置不买账所致)。被引用的 lib* 工程都已补 ARM64,随 -p:Platform=ARM64 级联编出。
+    echo ">>> MSBuild libmupdf.vcxproj 直编(Release|ARM64)..."
+    MSBuild.exe "${WIN32}/libmupdf.vcxproj" -p:Configuration=Release -p:Platform=ARM64 -m -v:minimal -nologo
+else
+    # amd64:走 .sln -t:libmupdf。bin2coff 仅 Win32 配置,.sln 把它的 Release|x64 映射成 Release|Win32,
+    # 让这个 x86 宿主工具正确按 Win32 编(直编 .vcxproj 会把 x64 强加给它 → MSB8013)。
+    echo ">>> MSBuild mupdf.sln -t:libmupdf(Release|x64)..."
+    MSBuild.exe "${WIN32}/mupdf.sln" -t:libmupdf -p:Configuration=Release -p:Platform=x64 -m -v:minimal -nologo
+fi
 
 # ---- 收集 .lib:libmupdf → mupdf_windows_<arch>.lib;其余全部合并 → mupdfthird_windows_<arch>.lib ----
 echo ">>> 收集 + 合并静态库..."
