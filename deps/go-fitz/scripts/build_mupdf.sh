@@ -65,8 +65,10 @@ for vcx in glob.glob(os.path.join(win32, "*.vcxproj")):
     s = re.sub(r'(\s*<ProjectConfiguration Include="[^"]*\|' + sp + r'">.*?</ProjectConfiguration>)',
                lambda m: m.group(1) + m.group(1).replace("|" + sp, "|ARM64").replace(">" + sp + "<", ">ARM64<"),
                s, flags=re.S)
+    # 克隆成 ARM64 时,把 Link/Lib 段的 TargetMachine 也从 X86/X64 改成 ARM64,否则编译器按 Platform=ARM64
+    # 出 ARM64 .obj 而链接器仍按克隆来源的机器类型 → LNK1112 "module machine type ARM64 conflicts with x86"。
     s = re.sub(r'(\s*<(PropertyGroup|ItemDefinitionGroup)[^>]*Condition="\'\$\(Configuration\)\|\$\(Platform\)\'==\'[^\']*\|' + sp + r'\'"[^>]*>.*?</\2>)',
-               lambda m: m.group(1) + m.group(1).replace("|" + sp + "'", "|ARM64'"),
+               lambda m: m.group(1) + m.group(1).replace("|" + sp + "'", "|ARM64'").replace("MachineX86", "MachineARM64").replace("MachineX64", "MachineARM64"),
                s, flags=re.S)
     s = re.sub(r'\s*<ItemGroup>\s*<ProjectReference\b.*?</ItemGroup>', '', s, flags=re.S)
     open(vcx, "w", encoding="utf-8").write(s)
