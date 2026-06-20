@@ -49,7 +49,7 @@ done
 # 注:此段为 best-effort,首跑大概率要按 CI 日志迭代(.sln 平台映射 / bin2coff 机器码传参细节)。
 if [ "$MSB_PLAT" = "ARM64" ]; then
     echo ">>> patch(arm64): .vcxproj 复制 x64 配置块为 ARM64 + mupdf.sln 加 ARM64 平台 + bin2coff.c 支持 AArch64"
-    python3 - "$WIN32" <<'PYEOF'
+    PYTHONUTF8=1 PYTHONIOENCODING=utf-8 python3 - "$WIN32" <<'PYEOF'
 import sys, re, glob, os
 win32 = sys.argv[1]
 
@@ -84,7 +84,7 @@ if "Release|ARM64 = Release|ARM64" not in s:
         lambda m: m.group(1) + m.group(4) + "\t\t" + m.group(2) + ".Release|ARM64." + m.group(3) + " = Release|ARM64" + m.group(4),
         s)
     open(sln, "w", encoding="utf-8").write(s)
-    print("  mupdf.sln +Release|ARM64(解决方案配置 + 全工程映射)")
+    print("  mupdf.sln +Release|ARM64 (solution config + all project mappings)")
 PYEOF
     # bin2coff.c:增加 ARM64(0xAA64)机器码;原 1.24.9 仅 I386/AMD64。仅 arm64 构建走此分支,故无条件出 ARM64。
     if ! grep -q "IMAGE_FILE_MACHINE_ARM64" scripts/bin2coff.c; then
