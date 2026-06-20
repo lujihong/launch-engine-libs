@@ -76,6 +76,10 @@ for vcx in glob.glob(os.path.join(win32, "*.vcxproj")):
     #   runner 已装 19041/22621/26100)。两者叠加:无论 cl 是否有 intrinsic,22621 winnt.h 都不触发 C3861。
     s = s.replace("<PlatformToolset>v142</PlatformToolset>", "<PlatformToolset>v143</PlatformToolset>")
     s = s.replace("<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>", "<WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>")
+    # 关 OCR:去掉 HAVE_LEPTONICA/HAVE_TESSERACT 定义 → config.h(216-218)自动 #define OCR_DISABLED →
+    #   libmupdf 的 ocr-device.c/output-pdfocr.c 走禁用分支、不引用 tesseract。这样无需编 leptonica/tesseract
+    #   (它们的 scripts/tesseract/endianness.h 不认 ARM64 报 C1189),且匹配 go-fitz 自带 third(仅 9MB,本就无 OCR)。
+    s = s.replace("HAVE_TESSERACT;", "").replace("HAVE_LEPTONICA;", "")
     open(vcx, "w", encoding="utf-8").write(s)
     print("  vcxproj +ARM64(from " + sp + ") / -ProjectReference / v143+SDK22621:", os.path.basename(vcx))
 PYEOF
@@ -102,7 +106,7 @@ if [ "$MSB_PLAT" = "ARM64" ]; then
     WIN32_ABS=$(cygpath -m "$(pwd)/${WIN32}")
     echo ">>> arm64:先编 bin2coff(SolutionDir=${WIN32_ABS}/)..."
     MSBuild.exe "${WIN32}/bin2coff.vcxproj" -p:Configuration=Release -p:Platform=ARM64 -p:SolutionDir="${WIN32_ABS}/" -m -v:minimal -nologo
-    for proj in libthirdparty libharfbuzz libleptonica libtesseract libpkcs7 libextract libresources libmupdf; do
+    for proj in libthirdparty libharfbuzz libpkcs7 libextract libresources libmupdf; do
         echo ">>> arm64:编 ${proj}.vcxproj..."
         MSBuild.exe "${WIN32}/${proj}.vcxproj" -p:Configuration=Release -p:Platform=ARM64 -p:SolutionDir="${WIN32_ABS}/" -m -v:minimal -nologo
     done
