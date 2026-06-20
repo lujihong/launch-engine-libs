@@ -48,46 +48,29 @@ done
 # ---- patch 2(仅 arm64):官方 1.24.9 .sln/.vcxproj 无 ARM64 平台 + bin2coff.c 不认 ARM64 ----
 # 注:此段为 best-effort,首跑大概率要按 CI 日志迭代(.sln 平台映射 / bin2coff 机器码传参细节)。
 if [ "$MSB_PLAT" = "ARM64" ]; then
-    echo ">>> patch(arm64): .vcxproj 复制 x64 配置块为 ARM64 + mupdf.sln 加 ARM64 平台 + bin2coff.c 支持 AArch64"
+    echo ">>> patch(arm64): 各 .vcxproj 就地复制配置块成 ARM64(bin2coff 从 Win32 复制)+ 删真 ProjectReference + bin2coff.c 支持 AArch64"
     PYTHONUTF8=1 PYTHONIOENCODING=utf-8 python3 - "$WIN32" <<'PYEOF'
 import sys, re, glob, os
 win32 = sys.argv[1]
-
-# 1) 每个 .vcxproj:把 |x64 的 ProjectConfiguration + 条件 PropertyGroup/ItemDefinitionGroup 复制一份成 |ARM64
+# 每个 .vcxproj:**就地**把 |<sp> 配置块复制一份成 |ARM64(紧跟源块之后,不挪去 </Project>,防结构损坏);
+# 再删掉「真 ProjectReference」(带 Include= 的整个 ItemGroup)。
+#   sp:多数工程有 x64 → 从 x64 复制;bin2coff 仅 Win32(无 x64)→ 从 Win32 复制,否则缺 ARM64 配置 MSB8013。
+#   删真 ProjectReference:ARM64 下 MSBuild 的 AssignProjectConfiguration 跨工程解析触发 MSB3107;各库独立编+
+#   手动合并 .lib 不需级联。无 Include 的 <ProjectReference> 是 ItemDefinitionGroup 内默认元数据,无害,留着。
 for vcx in glob.glob(os.path.join(win32, "*.vcxproj")):
     s = open(vcx, encoding="utf-8", errors="replace").read()
     if "|ARM64" in s:
-        continue  # 已有 ARM64 配置,跳过
-    pcs = re.findall(r'(\s*<ProjectConfiguration Include="[^"]*\|x64">.*?</ProjectConfiguration>)', s, re.S)
-    add = "".join(b.replace("|x64", "|ARM64").replace(">x64<", ">ARM64<") for b in pcs)
-    if add:
-        s = s.replace("</ItemGroup>", add + "\n  </ItemGroup>", 1)
-    conds = re.findall(r"(\s*<(PropertyGroup|ItemDefinitionGroup)[^>]*Condition=\"'\$\(Configuration\)\|\$\(Platform\)'=='[^']*\|x64'\"[^>]*>.*?</\2>)", s, re.S)
-    addc = "".join(b[0].replace("|x64'", "|ARM64'") for b in conds)
-    if addc:
-        s = s.replace("</Project>", addc + "\n</Project>", 1)
-    # 去掉所有 ProjectReference:ARM64 下 MSBuild 的 AssignProjectConfiguration 跨工程解析触发 MSB3107。
-    # 我们各库独立编 + 手动合并 .lib,根本不需要级联引用(静态库不链接依赖,只归档自身 .obj)。
-    s = re.sub(r"[ \t]*<ProjectReference\b[^>]*>.*?</ProjectReference>\s*\r?\n?", "", s, flags=re.S)
+        continue
+    sp = "x64" if '|x64"' in s else "Win32"
+    s = re.sub(r'(\s*<ProjectConfiguration Include="[^"]*\|' + sp + r'">.*?</ProjectConfiguration>)',
+               lambda m: m.group(1) + m.group(1).replace("|" + sp, "|ARM64").replace(">" + sp + "<", ">ARM64<"),
+               s, flags=re.S)
+    s = re.sub(r'(\s*<(PropertyGroup|ItemDefinitionGroup)[^>]*Condition="\'\$\(Configuration\)\|\$\(Platform\)\'==\'[^\']*\|' + sp + r'\'"[^>]*>.*?</\2>)',
+               lambda m: m.group(1) + m.group(1).replace("|" + sp + "'", "|ARM64'"),
+               s, flags=re.S)
+    s = re.sub(r'\s*<ItemGroup>\s*<ProjectReference\b.*?</ItemGroup>', '', s, flags=re.S)
     open(vcx, "w", encoding="utf-8").write(s)
-    print("  vcxproj +ARM64 / -ProjectReference:", os.path.basename(vcx))
-
-# 2) mupdf.sln:加 Release|ARM64 解决方案配置 + 每工程的 Release|ARM64 → Release|ARM64 映射
-#    (含 bin2coff:在 arm64 原生 runner 上原生编 arm64,运行 + 经 patch 后的 bin2coff.c 出 ARM64 字体目标)
-sln = os.path.join(win32, "mupdf.sln")
-s = open(sln, encoding="utf-8", errors="replace").read()
-if "Release|ARM64 = Release|ARM64" not in s:
-    # SolutionConfigurationPlatforms:在 Release|x64 行后插 Release|ARM64
-    s = re.sub(r"(\t\tRelease\|x64 = Release\|x64\r?\n)",
-               r"\1\t\tRelease|ARM64 = Release|ARM64\r\n", s, count=1)
-    # ProjectConfigurationPlatforms:每条 {GUID}.Release|x64.(ActiveCfg|Build.0) = Release|(x64|Win32) 后
-    # 追加一条 .Release|ARM64.<同> = Release|ARM64(全部工程都编 ARM64)
-    s = re.sub(
-        r"(\t\t(\{[0-9A-Fa-f-]+\})\.Release\|x64\.(ActiveCfg|Build\.0) = Release\|(?:x64|Win32))(\r?\n)",
-        lambda m: m.group(1) + m.group(4) + "\t\t" + m.group(2) + ".Release|ARM64." + m.group(3) + " = Release|ARM64" + m.group(4),
-        s)
-    open(sln, "w", encoding="utf-8").write(s)
-    print("  mupdf.sln +Release|ARM64 (solution config + all project mappings)")
+    print("  vcxproj +ARM64(from " + sp + ") / -ProjectReference:", os.path.basename(vcx))
 PYEOF
     # bin2coff.c:增加 ARM64(0xAA64)机器码;原 1.24.9 仅 I386/AMD64。仅 arm64 构建走此分支,故无条件出 ARM64。
     if ! grep -q "IMAGE_FILE_MACHINE_ARM64" scripts/bin2coff.c; then
