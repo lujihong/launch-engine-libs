@@ -81,18 +81,22 @@ PYEOF
     fi
 fi
 
-# ---- 编译 libmupdf(MSBuild 经 ProjectReference 级联编 thirdparty/resources/harfbuzz/pkcs7/extract/tesseract) ----
-echo ">>> MSBuild libmupdf.vcxproj(Release|${MSB_PLAT})..."
-MSBuild.exe "${WIN32}/libmupdf.vcxproj" \
+# ---- 编译 libmupdf(经 ProjectReference 级联编 thirdparty/resources/harfbuzz/pkcs7/extract/tesseract) ----
+# **必须走 .sln(而非直接 .vcxproj)**:.sln 有 per-project 配置映射,把宿主工具 bin2coff 的
+# 「方案 Release|x64」正确映射成它自己的 Release|Win32(bin2coff 只有 Win32 配置,是 x86 宿主小工具)。
+# 直接 msbuild libmupdf.vcxproj 会把 x64 强加给被引用的 bin2coff → MSB8013 "doesn't contain Release|x64"。
+# 不强制 PlatformToolset(用 runner 的 VS 默认;之前各工程已能编,说明默认 toolset 可用)。
+echo ">>> MSBuild mupdf.sln -t:libmupdf(Release|${MSB_PLAT})..."
+MSBuild.exe "${WIN32}/mupdf.sln" -t:libmupdf \
     -p:Configuration=Release -p:Platform="${MSB_PLAT}" \
-    -p:PlatformToolset=v143 -m -v:minimal -nologo
+    -m -v:minimal -nologo
 
 # ---- 收集 .lib:libmupdf → mupdf_windows_<arch>.lib;其余全部合并 → mupdfthird_windows_<arch>.lib ----
 echo ">>> 收集 + 合并静态库..."
 TARGET_DIR="${LIB_DIR}/${PLATFORM}"
 mkdir -p "${TARGET_DIR}"
 
-ALL_LIBS=$(find "${WIN32}" -name "*.lib" -path "*Release*" 2>/dev/null)
+ALL_LIBS=$(find "${WIN32}" -name "*.lib" -path "*${MSB_PLAT}/Release*" 2>/dev/null)
 [ -n "$ALL_LIBS" ] || { echo "✗ 未在 ${WIN32}/**/Release 下找到任何 .lib"; find "${WIN32}" -name "*.lib" | head; exit 1; }
 echo "找到的 .lib:"; echo "$ALL_LIBS" | sed 's#.*/##' | sort -u
 
