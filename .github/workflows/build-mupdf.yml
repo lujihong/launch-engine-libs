@@ -1,0 +1,47 @@
+# 编 MuPDF 1.24.9 静态库(MSVC /MT)给 go-fitz——独立于 build-native-libs(不连累几小时的 onnx 重编)。
+# 产物 mupdf_windows_<arch>.lib + mupdfthird_windows_<arch>.lib 上传为 artifact,再经 publish-libs 发到 release。
+#
+# 用法：Actions → Build MuPDF → Run workflow → 选 platform。**先跑 windows-amd64 验证整链路,再跑 arm64**
+#   (arm64 的 .sln/.vcxproj/bin2coff 需脚本补 ARM64,首跑大概率要按日志迭代)。
+name: Build MuPDF
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "目标平台(先 windows-amd64 验证)"
+        required: true
+        type: choice
+        default: windows-amd64
+        options:
+          - windows-amd64
+          - windows-arm64
+
+jobs:
+  build:
+    name: mupdf ${{ inputs.platform }}
+    runs-on: ${{ inputs.platform == 'windows-arm64' && 'windows-11-arm' || 'windows-latest' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ inputs.platform == 'windows-arm64' && 'arm64' || 'amd64' }}
+
+      - name: 编译 MuPDF 静态库
+        shell: bash
+        run: |
+          chmod +x deps/go-fitz/scripts/build_mupdf.sh
+          deps/go-fitz/scripts/build_mupdf.sh ${{ inputs.platform }}
+
+      - name: 列出产物
+        shell: bash
+        run: ls -lh deps/go-fitz/lib/${{ inputs.platform }}/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-mupdf-${{ inputs.platform }}
+          retention-days: 30
+          path: deps/go-fitz/lib/${{ inputs.platform }}/

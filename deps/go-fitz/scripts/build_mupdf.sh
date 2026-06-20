@@ -1,0 +1,112 @@
+#!/bin/bash
+# 编译 MuPDF 静态库(MSVC /MT)给 go-fitz 用——产出 mupdf_windows_<arch>.lib + mupdfthird_windows_<arch>.lib。
+# 用法: ./build_mupdf.sh windows-amd64 | windows-arm64
+#
+# 为什么:go-fitz(gen2brain/go-fitz)只自带 MinGW .a,MSVC lld-link 用不了。我们走 go-fitz **默认模式**
+#   (#cgo CFLAGS:-Iinclude 用其自带 1.24.9 头;LDFLAGS:-lmupdf_windows_<arch> -lmupdfthird_windows_<arch>),
+#   只需在链接路径放同名的 **MSVC /MT 静态 .lib** 顶替即可(clang-msvc 把 -lfoo 译成 foo.lib,不会误选 .a)。
+# 版本铁律:MuPDF 必须 1.24.9——与 go-fitz v1.24.15 自带头 FZ_VERSION "1.24.9" 严格一致(结构体 ABI)。
+# CRT 铁律:必须 /MT(MultiThreaded),与 onnx/sherpa/cgo 全家桶一致,否则撞 RuntimeLibrary mismatch。
+set -euo pipefail
+
+MUPDF_VERSION="1.24.9"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUILD_DIR="${SCRIPT_DIR}/../_build"
+LIB_DIR="${SCRIPT_DIR}/../lib"
+
+PLATFORM="${1:?用法: build_mupdf.sh windows-amd64|windows-arm64}"
+case "$PLATFORM" in
+    windows-amd64) MSB_PLAT="x64";   ARCH="amd64" ;;
+    windows-arm64) MSB_PLAT="ARM64"; ARCH="arm64" ;;
+    *) echo "不支持的平台: $PLATFORM(本脚本只编 Windows mupdf)"; exit 1 ;;
+esac
+echo "=== 编译 MuPDF ${MUPDF_VERSION} for ${PLATFORM}(MSVC /MT 静态) ==="
+
+# 克隆 MuPDF + submodule(thirdparty:freetype/harfbuzz/jbig2dec/openjpeg/... 必需)
+mkdir -p "${BUILD_DIR}"
+SRC="${BUILD_DIR}/mupdf"
+if [ ! -d "${SRC}/.git" ]; then
+    echo ">>> 克隆 MuPDF ${MUPDF_VERSION} + submodule(较大,首次慢)..."
+    git clone --depth 1 --branch "${MUPDF_VERSION}" --recurse-submodules --shallow-submodules \
+        https://github.com/ArtifexSoftware/mupdf "${SRC}"
+fi
+cd "${SRC}"
+WIN32="platform/win32"
+
+# ---- patch 1:全部 lib 工程 /MD→/MT(官方 Release 默认 MultiThreadedDLL,我们要纯静态 /MT) ----
+echo ">>> patch: MultiThreadedDLL → MultiThreaded(全 .vcxproj)"
+for vcx in "${WIN32}"/*.vcxproj; do
+    sed -i \
+        -e 's#<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>#<RuntimeLibrary>MultiThreaded</RuntimeLibrary>#g' \
+        -e 's#<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>#<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>#g' \
+        "$vcx"
+done
+
+# ---- patch 2(仅 arm64):官方 1.24.9 .sln/.vcxproj 无 ARM64 平台 + bin2coff.c 不认 ARM64 ----
+# 注:此段为 best-effort,首跑大概率要按 CI 日志迭代(.sln 平台映射 / bin2coff 机器码传参细节)。
+if [ "$MSB_PLAT" = "ARM64" ]; then
+    echo ">>> patch(arm64): 给 .vcxproj 复制 x64 配置块为 ARM64 + bin2coff.c 支持 AArch64"
+    python3 - "$WIN32" <<'PYEOF'
+import sys, re, glob, os
+win32 = sys.argv[1]
+# 对每个 vcxproj:把所有 |x64 的 PropertyGroup/ItemDefinitionGroup/ProjectConfiguration 复制成 |ARM64
+for vcx in glob.glob(os.path.join(win32, "*.vcxproj")):
+    s = open(vcx, encoding="utf-8").read()
+    # ProjectConfiguration 块(<ProjectConfiguration Include="Release|x64">...)
+    def dup_blocks(text):
+        out = []
+        # 复制带 'x64' 的整块元素为 ARM64(粗粒度:行内出现 |x64' 或 ="x64" 的配置块)
+        return text
+    # 简化稳健做法:把所有出现的 "|x64" / ">x64<" / "'x64'" 配置整体再生成一份 ARM64
+    # ProjectConfiguration Include="...|x64"
+    pcs = re.findall(r'(\s*<ProjectConfiguration Include="[^"]*\|x64">.*?</ProjectConfiguration>)', s, re.S)
+    add = "".join(b.replace("|x64", "|ARM64").replace(">x64<", ">ARM64<") for b in pcs)
+    if add:
+        s = s.replace("</ItemGroup>", add + "\n  </ItemGroup>", 1)
+    # 条件块 Condition="'$(Configuration)|$(Platform)'=='Xxx|x64'"
+    conds = re.findall(r"(\s*<(PropertyGroup|ItemDefinitionGroup)[^>]*Condition=\"'\$\(Configuration\)\|\$\(Platform\)'=='[^']*\|x64'\"[^>]*>.*?</\2>)", s, re.S)
+    addc = "".join(b[0].replace("|x64'", "|ARM64'") for b in conds)
+    if addc:
+        s = s.replace("</Project>", addc + "\n</Project>", 1)
+    open(vcx, "w", encoding="utf-8").write(s)
+    print("  patched ARM64 configs:", os.path.basename(vcx))
+PYEOF
+    # bin2coff.c:增加 ARM64(0xAA64)机器码;原 1.24.9 仅 I386/AMD64(line ~344)
+    if ! grep -q "IMAGE_FILE_MACHINE_ARM64" scripts/bin2coff.c; then
+        sed -i \
+            -e 's@#define IMAGE_FILE_MACHINE_AMD64\(\s*\)0x8664@#define IMAGE_FILE_MACHINE_AMD64\1 0x8664\n#define IMAGE_FILE_MACHINE_ARM64 0xAA64@' \
+            -e 's@file_header->Machine = (x86_32)?IMAGE_FILE_MACHINE_I386:IMAGE_FILE_MACHINE_AMD64;@file_header->Machine = IMAGE_FILE_MACHINE_ARM64;@' \
+            scripts/bin2coff.c
+        echo "  patched bin2coff.c → ARM64(注:这把宿主全部按 ARM64 出码,仅适配纯 ARM64 构建)"
+    fi
+fi
+
+# ---- 编译 libmupdf(MSBuild 经 ProjectReference 级联编 thirdparty/resources/harfbuzz/pkcs7/extract/tesseract) ----
+echo ">>> MSBuild libmupdf.vcxproj(Release|${MSB_PLAT})..."
+MSBuild.exe "${WIN32}/libmupdf.vcxproj" \
+    -p:Configuration=Release -p:Platform="${MSB_PLAT}" \
+    -p:PlatformToolset=v143 -m -v:minimal -nologo
+
+# ---- 收集 .lib:libmupdf → mupdf_windows_<arch>.lib;其余全部合并 → mupdfthird_windows_<arch>.lib ----
+echo ">>> 收集 + 合并静态库..."
+TARGET_DIR="${LIB_DIR}/${PLATFORM}"
+mkdir -p "${TARGET_DIR}"
+
+ALL_LIBS=$(find "${WIN32}" -name "*.lib" -path "*Release*" 2>/dev/null)
+[ -n "$ALL_LIBS" ] || { echo "✗ 未在 ${WIN32}/**/Release 下找到任何 .lib"; find "${WIN32}" -name "*.lib" | head; exit 1; }
+echo "找到的 .lib:"; echo "$ALL_LIBS" | sed 's#.*/##' | sort -u
+
+CORE=$(echo "$ALL_LIBS" | grep -iE "/libmupdf\.lib$" | head -1)
+[ -n "$CORE" ] || { echo "✗ 未找到 libmupdf.lib(核心库)"; exit 1; }
+cp "$CORE" "${TARGET_DIR}/mupdf_windows_${ARCH}.lib"
+echo "  核心: $(basename "$CORE") → mupdf_windows_${ARCH}.lib"
+
+# 其余(libthirdparty/libresources/libharfbuzz/libpkcs7/libextract/libtesseract/libleptonica...)合并为 third
+THIRD_INPUTS=$(echo "$ALL_LIBS" | grep -ivE "/libmupdf\.lib$")
+OUT_THIRD=$(cygpath -w "${TARGET_DIR}/mupdfthird_windows_${ARCH}.lib")
+# shellcheck disable=SC2086
+MSYS_NO_PATHCONV=1 lib.exe "-OUT:${OUT_THIRD}" $THIRD_INPUTS
+echo "  其余库合并 → mupdfthird_windows_${ARCH}.lib"
+
+echo "=== 完成: ${PLATFORM} ==="
+ls -lh "${TARGET_DIR}/"
