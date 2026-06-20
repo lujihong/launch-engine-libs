@@ -33,12 +33,15 @@ fi
 cd "${SRC}"
 WIN32="platform/win32"
 
-# ---- patch 1:全部 lib 工程 /MD→/MT(官方 Release 默认 MultiThreadedDLL,我们要纯静态 /MT) ----
-echo ">>> patch: MultiThreadedDLL → MultiThreaded(全 .vcxproj)"
+# ---- patch 1:全部 lib 工程 (a) /MD→/MT(纯静态 CRT) (b) 关 /GL 全程序优化 ----
+# /GL(WholeProgramOptimization=true)产的 .obj 是 IL 中间格式(非原生 COFF),只有 MSVC link.exe 能消费,
+# lld-link 报 "is not a native COFF file. Recompile without /GL"。关掉 → 原生 COFF(且库体积从数百 MB 砍到几十 MB)。
+echo ">>> patch: MultiThreadedDLL→MultiThreaded + WholeProgramOptimization(/GL) true→false(全 .vcxproj)"
 for vcx in "${WIN32}"/*.vcxproj; do
     sed -i \
         -e 's#<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>#<RuntimeLibrary>MultiThreaded</RuntimeLibrary>#g' \
         -e 's#<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>#<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>#g' \
+        -e 's#<WholeProgramOptimization>true</WholeProgramOptimization>#<WholeProgramOptimization>false</WholeProgramOptimization>#g' \
         "$vcx"
 done
 
