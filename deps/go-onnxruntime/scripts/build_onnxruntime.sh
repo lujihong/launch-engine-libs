@@ -97,6 +97,10 @@ case "$(uname -s)" in
         # Windows: build.bat。生成器按平台（见上 WIN_GENERATOR）：
         #   amd64=Ninja（msvc-dev-cmd 的 cl.exe；KleidiAI 不参与故关）；
         #   arm64=VS 生成器（MSBuild 正确路由 armasm64 标志，保留 KleidiAI；EXTRA_BUILD_FLAGS=--arm64 产 ARM64）。
+        # --enable_msvc_static_runtime：onnxruntime+protobuf+abseil+onnx 全编成 /MT 静态 CRT。
+        # 必须开——否则 onnx 默认 /MD(动态 CRT),与 sherpa/cgo 的 /MT 撞 RuntimeLibrary(LIBCMT vs MSVCRT),
+        # 且 /MD 会让最终 exe 依赖 vcruntime140.dll(非纯静态)。它经 build.py 设
+        # CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded + ONNX/protobuf/ABSL_MSVC_STATIC_RUNTIME=ON。
         ./build.bat \
             --config Release \
             --parallel \
@@ -104,6 +108,7 @@ case "$(uname -s)" in
             --skip_submodule_sync \
             --cmake_generator "${WIN_GENERATOR}" \
             --compile_no_warning_as_error \
+            --enable_msvc_static_runtime \
             ${EXTRA_BUILD_FLAGS} \
             --cmake_extra_defines \
                 CMAKE_POSITION_INDEPENDENT_CODE=ON \

@@ -106,8 +106,16 @@ else
 fi
 
 echo ">>> 编译中（含 TTS 支持）..."
+# 清旧构建目录:防残留 CMakeCache 把上次的 Debug/CRT 配置粘进来(IDL=2 在 CI 复现的常见真因之一)。
+rm -rf build install
+# -DCMAKE_BUILD_TYPE=Release:**必须显式给**。Windows 用 -G Ninja(单配置生成器),后面的
+#   `cmake --build --config Release` 是 no-op,build type 只在 configure 期由本变量定;不给则可能落到
+#   含 _DEBUG 的配置 → _ITERATOR_DEBUG_LEVEL=2,与 onnx(Release,IDL=0)撞 /failifmismatch。
+# -DSHERPA_ONNX_USE_STATIC_CRT=ON:锁死 /MT 静态 CRT(sherpa 默认已 ON,显式化防上游改默认;非 MSVC 平台无副作用)。
 cmake -S . -B build \
     -DBUILD_SHARED_LIBS=OFF \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DSHERPA_ONNX_USE_STATIC_CRT=ON \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DSHERPA_ONNX_USE_PRE_INSTALLED_ONNXRUNTIME_IF_AVAILABLE=ON \
     -DCMAKE_CXX_FLAGS="${COREML_CXX_FLAGS}" \
