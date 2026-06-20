@@ -66,8 +66,11 @@ for vcx in glob.glob(os.path.join(win32, "*.vcxproj")):
     addc = "".join(b[0].replace("|x64'", "|ARM64'") for b in conds)
     if addc:
         s = s.replace("</Project>", addc + "\n</Project>", 1)
+    # 去掉所有 ProjectReference:ARM64 下 MSBuild 的 AssignProjectConfiguration 跨工程解析触发 MSB3107。
+    # 我们各库独立编 + 手动合并 .lib,根本不需要级联引用(静态库不链接依赖,只归档自身 .obj)。
+    s = re.sub(r"[ \t]*<ProjectReference\b[^>]*>.*?</ProjectReference>\s*\r?\n?", "", s, flags=re.S)
     open(vcx, "w", encoding="utf-8").write(s)
-    print("  vcxproj +ARM64:", os.path.basename(vcx))
+    print("  vcxproj +ARM64 / -ProjectReference:", os.path.basename(vcx))
 
 # 2) mupdf.sln:加 Release|ARM64 解决方案配置 + 每工程的 Release|ARM64 → Release|ARM64 映射
 #    (含 bin2coff:在 arm64 原生 runner 上原生编 arm64,运行 + 经 patch 后的 bin2coff.c 出 ARM64 字体目标)
@@ -102,11 +105,17 @@ fi
 # 直接 msbuild libmupdf.vcxproj 会把 x64 强加给被引用的 bin2coff → MSB8013 "doesn't contain Release|x64"。
 # 不强制 PlatformToolset(用 runner 的 VS 默认;之前各工程已能编,说明默认 toolset 可用)。
 if [ "$MSB_PLAT" = "ARM64" ]; then
-    # arm64:**直接编 libmupdf.vcxproj**(不走 .sln)。bin2coff 已由 patch 补了 ARM64 配置,故级联编它不再
-    # MSB8013;且直编无 .sln 上下文 → 不触发 AssignProjectConfiguration 的 MSB3107(那是 .sln -t: 模式对
-    # 新增 ARM64 方案配置不买账所致)。被引用的 lib* 工程都已补 ARM64,随 -p:Platform=ARM64 级联编出。
-    echo ">>> MSBuild libmupdf.vcxproj 直编(Release|ARM64)..."
-    MSBuild.exe "${WIN32}/libmupdf.vcxproj" -p:Configuration=Release -p:Platform=ARM64 -m -v:minimal -nologo
+    # arm64:已去掉所有 ProjectReference(避开 ARM64 跨工程解析 MSB3107),故**各工程逐个独立编**。
+    # bin2coff 先编(libresources 字体生成的 CustomBuild 命令是 `Release\bin2coff.exe ... $(Platform)`):
+    #   其 OutDir=$(SolutionDir)$(Configuration)\,直编需显式给 SolutionDir 指向 win32 目录,bin2coff.exe 才落到
+    #   win32/Release/(=字体命令找的相对 Release\)。bin2coff 编成 ARM64,在 arm64 runner 原生跑,出 ARM64 字体目标。
+    WIN32_ABS=$(cygpath -m "$(pwd)/${WIN32}")
+    echo ">>> arm64:先编 bin2coff(SolutionDir=${WIN32_ABS}/)..."
+    MSBuild.exe "${WIN32}/bin2coff.vcxproj" -p:Configuration=Release -p:Platform=ARM64 -p:SolutionDir="${WIN32_ABS}/" -m -v:minimal -nologo
+    for proj in libthirdparty libharfbuzz libleptonica libtesseract libpkcs7 libextract libresources libmupdf; do
+        echo ">>> arm64:编 ${proj}.vcxproj..."
+        MSBuild.exe "${WIN32}/${proj}.vcxproj" -p:Configuration=Release -p:Platform=ARM64 -p:SolutionDir="${WIN32_ABS}/" -m -v:minimal -nologo
+    done
 else
     # amd64:走 .sln -t:libmupdf。bin2coff 仅 Win32 配置,.sln 把它的 Release|x64 映射成 Release|Win32,
     # 让这个 x86 宿主工具正确按 Win32 编(直编 .vcxproj 会把 x64 强加给它 → MSB8013)。
