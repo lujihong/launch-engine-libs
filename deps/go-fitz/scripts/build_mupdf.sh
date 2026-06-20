@@ -48,39 +48,51 @@ done
 # ---- patch 2(仅 arm64):官方 1.24.9 .sln/.vcxproj 无 ARM64 平台 + bin2coff.c 不认 ARM64 ----
 # 注:此段为 best-effort,首跑大概率要按 CI 日志迭代(.sln 平台映射 / bin2coff 机器码传参细节)。
 if [ "$MSB_PLAT" = "ARM64" ]; then
-    echo ">>> patch(arm64): 给 .vcxproj 复制 x64 配置块为 ARM64 + bin2coff.c 支持 AArch64"
+    echo ">>> patch(arm64): .vcxproj 复制 x64 配置块为 ARM64 + mupdf.sln 加 ARM64 平台 + bin2coff.c 支持 AArch64"
     python3 - "$WIN32" <<'PYEOF'
 import sys, re, glob, os
 win32 = sys.argv[1]
-# 对每个 vcxproj:把所有 |x64 的 PropertyGroup/ItemDefinitionGroup/ProjectConfiguration 复制成 |ARM64
+
+# 1) 每个 .vcxproj:把 |x64 的 ProjectConfiguration + 条件 PropertyGroup/ItemDefinitionGroup 复制一份成 |ARM64
 for vcx in glob.glob(os.path.join(win32, "*.vcxproj")):
-    s = open(vcx, encoding="utf-8").read()
-    # ProjectConfiguration 块(<ProjectConfiguration Include="Release|x64">...)
-    def dup_blocks(text):
-        out = []
-        # 复制带 'x64' 的整块元素为 ARM64(粗粒度:行内出现 |x64' 或 ="x64" 的配置块)
-        return text
-    # 简化稳健做法:把所有出现的 "|x64" / ">x64<" / "'x64'" 配置整体再生成一份 ARM64
-    # ProjectConfiguration Include="...|x64"
+    s = open(vcx, encoding="utf-8", errors="replace").read()
+    if "|ARM64" in s:
+        continue  # 已有 ARM64 配置,跳过
     pcs = re.findall(r'(\s*<ProjectConfiguration Include="[^"]*\|x64">.*?</ProjectConfiguration>)', s, re.S)
     add = "".join(b.replace("|x64", "|ARM64").replace(">x64<", ">ARM64<") for b in pcs)
     if add:
         s = s.replace("</ItemGroup>", add + "\n  </ItemGroup>", 1)
-    # 条件块 Condition="'$(Configuration)|$(Platform)'=='Xxx|x64'"
     conds = re.findall(r"(\s*<(PropertyGroup|ItemDefinitionGroup)[^>]*Condition=\"'\$\(Configuration\)\|\$\(Platform\)'=='[^']*\|x64'\"[^>]*>.*?</\2>)", s, re.S)
     addc = "".join(b[0].replace("|x64'", "|ARM64'") for b in conds)
     if addc:
         s = s.replace("</Project>", addc + "\n</Project>", 1)
     open(vcx, "w", encoding="utf-8").write(s)
-    print("  patched ARM64 configs:", os.path.basename(vcx))
+    print("  vcxproj +ARM64:", os.path.basename(vcx))
+
+# 2) mupdf.sln:加 Release|ARM64 解决方案配置 + 每工程的 Release|ARM64 → Release|ARM64 映射
+#    (含 bin2coff:在 arm64 原生 runner 上原生编 arm64,运行 + 经 patch 后的 bin2coff.c 出 ARM64 字体目标)
+sln = os.path.join(win32, "mupdf.sln")
+s = open(sln, encoding="utf-8", errors="replace").read()
+if "Release|ARM64 = Release|ARM64" not in s:
+    # SolutionConfigurationPlatforms:在 Release|x64 行后插 Release|ARM64
+    s = re.sub(r"(\t\tRelease\|x64 = Release\|x64\r?\n)",
+               r"\1\t\tRelease|ARM64 = Release|ARM64\r\n", s, count=1)
+    # ProjectConfigurationPlatforms:每条 {GUID}.Release|x64.(ActiveCfg|Build.0) = Release|(x64|Win32) 后
+    # 追加一条 .Release|ARM64.<同> = Release|ARM64(全部工程都编 ARM64)
+    s = re.sub(
+        r"(\t\t(\{[0-9A-Fa-f-]+\})\.Release\|x64\.(ActiveCfg|Build\.0) = Release\|(?:x64|Win32))(\r?\n)",
+        lambda m: m.group(1) + m.group(4) + "\t\t" + m.group(2) + ".Release|ARM64." + m.group(3) + " = Release|ARM64" + m.group(4),
+        s)
+    open(sln, "w", encoding="utf-8").write(s)
+    print("  mupdf.sln +Release|ARM64(解决方案配置 + 全工程映射)")
 PYEOF
-    # bin2coff.c:增加 ARM64(0xAA64)机器码;原 1.24.9 仅 I386/AMD64(line ~344)
+    # bin2coff.c:增加 ARM64(0xAA64)机器码;原 1.24.9 仅 I386/AMD64。仅 arm64 构建走此分支,故无条件出 ARM64。
     if ! grep -q "IMAGE_FILE_MACHINE_ARM64" scripts/bin2coff.c; then
         sed -i \
             -e 's@#define IMAGE_FILE_MACHINE_AMD64\(\s*\)0x8664@#define IMAGE_FILE_MACHINE_AMD64\1 0x8664\n#define IMAGE_FILE_MACHINE_ARM64 0xAA64@' \
             -e 's@file_header->Machine = (x86_32)?IMAGE_FILE_MACHINE_I386:IMAGE_FILE_MACHINE_AMD64;@file_header->Machine = IMAGE_FILE_MACHINE_ARM64;@' \
             scripts/bin2coff.c
-        echo "  patched bin2coff.c → ARM64(注:这把宿主全部按 ARM64 出码,仅适配纯 ARM64 构建)"
+        echo "  patched bin2coff.c → ARM64"
     fi
 fi
 
