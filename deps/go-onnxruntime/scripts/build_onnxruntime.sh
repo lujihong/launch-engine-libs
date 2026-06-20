@@ -145,6 +145,20 @@ if [ -n "$BUILD_SUBDIR" ]; then
     CMAKE_BUILD_DIR="${BUILD_SUBDIR}/Release"
     [ -d "$CMAKE_BUILD_DIR" ] || CMAKE_BUILD_DIR="$BUILD_SUBDIR"
     cmake --build "$CMAKE_BUILD_DIR" --target re2 --config Release 2>/dev/null || true
+    # VS 生成器(windows-arm64)下 `cmake --build --target re2` 会 MSB1009(re2.vcxproj 不在 cwd),re2.lib 不生成
+    #   → 合并时缺 re2,最终 app 链接报 re2::RE2 undefined。兜底:若 re2.lib 仍缺,找到 re2.vcxproj 直编。
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            if [ -z "$(find build -name 're2.lib' 2>/dev/null | head -1)" ]; then
+                RE2_VCX=$(find build -name 're2.vcxproj' 2>/dev/null | head -1)
+                if [ -n "$RE2_VCX" ]; then
+                    RE2_PLAT=$([ "$PLATFORM" = "windows-arm64" ] && echo ARM64 || echo x64)
+                    echo "    VS 生成器兜底:直编 $RE2_VCX (Release|$RE2_PLAT)"
+                    MSBuild.exe "$(cygpath -w "$RE2_VCX")" -p:Configuration=Release -p:Platform="$RE2_PLAT" -v:minimal -nologo || true
+                fi
+            fi
+            ;;
+    esac
 fi
 
 # onnxruntime 的多个组件库合并为单一 libonnxruntime.a
