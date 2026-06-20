@@ -71,8 +71,13 @@ for vcx in glob.glob(os.path.join(win32, "*.vcxproj")):
                lambda m: m.group(1) + m.group(1).replace("|" + sp + "'", "|ARM64'").replace("MachineX86", "MachineARM64").replace("MachineX64", "MachineARM64"),
                s, flags=re.S)
     s = re.sub(r'\s*<ItemGroup>\s*<ProjectReference\b.*?</ItemGroup>', '', s, flags=re.S)
+    # v142(cl 19.29)不实现 SDK 26100 winnt.h 用的 ARM64 intrinsic _CountOneBits64 → C3861。
+    #   钉 v143(runner 的 17.14/cl 19.44 实现了它)+ SDK 22621(其 winnt.h 根本不调该 intrinsic,双保险;
+    #   runner 已装 19041/22621/26100)。两者叠加:无论 cl 是否有 intrinsic,22621 winnt.h 都不触发 C3861。
+    s = s.replace("<PlatformToolset>v142</PlatformToolset>", "<PlatformToolset>v143</PlatformToolset>")
+    s = s.replace("<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>", "<WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>")
     open(vcx, "w", encoding="utf-8").write(s)
-    print("  vcxproj +ARM64(from " + sp + ") / -ProjectReference:", os.path.basename(vcx))
+    print("  vcxproj +ARM64(from " + sp + ") / -ProjectReference / v143+SDK22621:", os.path.basename(vcx))
 PYEOF
     # bin2coff.c:增加 ARM64(0xAA64)机器码;原 1.24.9 仅 I386/AMD64。仅 arm64 构建走此分支,故无条件出 ARM64。
     if ! grep -q "IMAGE_FILE_MACHINE_ARM64" scripts/bin2coff.c; then
