@@ -1,5 +1,5 @@
 #!/bin/bash
-# 编译 sherpa-onnx 静态库（链接自编译的 onnxruntime 1.25.0）
+# 编译 sherpa-onnx 静态库（链接自编译的 onnxruntime 1.27.0）
 # 用法: ./build_sherpa_onnx.sh [platform]
 # platform: darwin-arm64, darwin-amd64, linux-amd64, linux-arm64, windows-amd64, windows-arm64
 # 不指定则编译当前平台
@@ -45,8 +45,10 @@ if [ ! -f "$ORT_STATIC" ]; then
     exit 1
 fi
 
-# 固定 sherpa-onnx 版本，确保各平台编译产出一致
-SHERPA_VERSION="v1.12.39"
+# 固定 sherpa-onnx 版本，确保各平台编译产出一致。
+# v1.13.3 起内置 NVIDIA Nemotron-3.5 streaming ASR（多语种，按流 SetOption("language",…)）——
+# 切换版本后须删 _build/sherpa-onnx 旧 clone 让其重拉对应 tag。
+SHERPA_VERSION="v1.13.3"
 
 # 克隆 sherpa-onnx 源码
 mkdir -p "${BUILD_DIR}"
@@ -68,7 +70,7 @@ case "$PLATFORM" in
     *) CMAKE_EXTRA="" ;;
 esac
 
-# 通过环境变量让 sherpa-onnx 使用我们自编译的 onnxruntime 1.25.0 静态库
+# 通过环境变量让 sherpa-onnx 使用我们自编译的 onnxruntime 1.27.0 静态库
 # 参见 cmake/onnxruntime.cmake 中的 SHERPA_ONNXRUNTIME_INCLUDE_DIR / SHERPA_ONNXRUNTIME_LIB_DIR
 # 头文件目录需包含 onnxruntime_cxx_api.h（sherpa-onnx 源码用 #include "onnxruntime_cxx_api.h"）
 export SHERPA_ONNXRUNTIME_INCLUDE_DIR="${ORT_PKG_DIR}/include"

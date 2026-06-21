@@ -1,12 +1,12 @@
 #!/bin/bash
-# 编译 onnxruntime 1.26.0 静态库
+# 编译 onnxruntime 1.27.0 静态库
 # 用法: ./build_onnxruntime.sh [platform]
 # platform: darwin-arm64, darwin-amd64, linux-amd64, linux-arm64, windows-amd64, windows-arm64
 # 不指定 platform 则编译当前平台
 
 set -euo pipefail
 
-ORT_VERSION="1.26.0"
+ORT_VERSION="1.27.0"
 ORT_REPO="https://github.com/microsoft/onnxruntime"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/../_build"
